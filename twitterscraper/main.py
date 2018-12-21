@@ -82,6 +82,10 @@ def main():
         parser.add_argument("-p", "--poolsize", type=int, default=20, help="Specify the number of parallel process you want to run. \n"
                             "Default value is set to 20. \nYou can change this number if you have more computing power available. \n"
                             "Set to 1 if you dont want to run any parallel processes.", metavar='\b')
+        parser.add_argument("--connect-timeout", type=float, default=-1.0, dest="ctimeout",
+                            help="Maximum time (in seconds) to allow for establishing connections.")
+        parser.add_argument("--read-timeout", type=float, default=-1.0, dest="rtimeout",
+                            help="Maximum time (in seconds) to allow for each request.")
         args = parser.parse_args()
 
         if isfile(args.output) and not args.dump:
@@ -91,15 +95,24 @@ def main():
         if args.all:
             args.begindate = dt.date(2006,3,1)
 
+        timeout = (
+            args.ctimeout if args.ctimeout != -1.0 else None,
+            args.rtimeout if args.rtimeout != -1.0 else None
+        )
+
         if args.user:
             tweets = query_tweets_from_user(user = args.query, limit = args.limit)
         else:
-            tweets = query_tweets(query = args.query, limit = args.limit,
-                              begindate = args.begindate, enddate = args.enddate,
-                              poolsize = args.poolsize, lang = args.lang)
+            tweets = query_tweets(
+                query=args.query, limit=args.limit, begindate=args.begindate,
+                enddate=args.enddate, poolsize=args.poolsize, lang=args.lang,
+                timeout=timeout
+            )
+
 
         if args.dump:
-            print(json.dumps(tweets, cls=JSONEncoder))
+            for tweet in tweets:
+                print(json.dumps(tweet, cls=JSONEncoder))
         else:
             if tweets:
                 with open(args.output, "w", encoding="utf-8") as output:

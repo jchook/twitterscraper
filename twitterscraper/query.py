@@ -52,7 +52,7 @@ def linspace(start, stop, n):
 
 
 
-def query_single_page(query, lang, pos, retry=50, from_user=False):
+def query_single_page(query, lang, pos, retry=50, from_user=False, timeout=None):
     """
     Returns tweets from the given URL.
 
@@ -60,12 +60,13 @@ def query_single_page(query, lang, pos, retry=50, from_user=False):
     :param lang: The language parameter of the query url
     :param pos: The query url parameter that determines where to start looking
     :param retry: Number of retries if something goes wrong.
+    :param timeout: Max time for the connection and response.
     :return: The list of tweets, the pos argument for getting the next page.
     """
     url = get_query_url(query, lang, pos, from_user)
 
     try:
-        response = requests.get(url, headers=HEADER)
+        response = requests.get(url, headers=HEADER, timeout=timeout)
         if pos is None:  # html response
             html = response.text or ''
             json_resp = None
@@ -116,7 +117,7 @@ def query_single_page(query, lang, pos, retry=50, from_user=False):
     return [], None
 
 
-def query_tweets_once_generator(query, limit=None, lang='', pos=None):
+def query_tweets_once_generator(query, limit=None, lang='', pos=None, timeout=None):
     """
     Queries twitter for all the tweets you want! It will load all pages it gets
     from twitter. However, twitter might out of a sudden stop serving new pages,
@@ -138,7 +139,7 @@ def query_tweets_once_generator(query, limit=None, lang='', pos=None):
     num_tweets = 0
     try:
         while True:
-            new_tweets, new_pos = query_single_page(query, lang, pos)
+            new_tweets, new_pos = query_single_page(query, lang, pos, timeout=timeout)
             if len(new_tweets) == 0:
                 logger.info('Got {} tweets for {}.'.format(
                     num_tweets, query))
@@ -176,7 +177,8 @@ def query_tweets_once(*args, **kwargs):
         return []
 
 
-def query_tweets(query, limit=None, begindate=dt.date(2006, 3, 21), enddate=dt.date.today(), poolsize=20, lang=''):
+def query_tweets(query, limit=None, begindate=dt.date(2006, 3, 21),
+                 enddate=dt.date.today(), poolsize=20, lang='', timeout=None):
     no_days = (enddate - begindate).days
 
     if(no_days < 0):
@@ -196,15 +198,19 @@ def query_tweets(query, limit=None, begindate=dt.date(2006, 3, 21), enddate=dt.d
     queries = ['{} since:{} until:{}'.format(query, since, until)
                for since, until in zip(dateranges[:-1], dateranges[1:])]
 
-    all_tweets = []
+    logger.info('making {} queries with timeout: {}'.format(len(queries), timeout))
+
+    all_tweets = 0
     try:
         pool = Pool(poolsize)
         logger.info('queries: {}'.format(queries))
         try:
-            for new_tweets in pool.imap_unordered(partial(query_tweets_once, limit=limit_per_pool, lang=lang), queries):
-                all_tweets.extend(new_tweets)
+            for new_tweets in pool.imap_unordered(partial(query_tweets_once, limit=limit_per_pool, lang=lang, timeout=timeout), queries):
+                all_tweets += len(new_tweets)
                 logger.info('Got {} tweets ({} new).'.format(
-                    len(all_tweets), len(new_tweets)))
+                    all_tweets, len(new_tweets)))
+                for tweet in new_tweets:
+                    yield tweet
         except KeyboardInterrupt:
             logger.info('Program interrupted by user. Returning all tweets '
                          'gathered so far.')
@@ -212,14 +218,12 @@ def query_tweets(query, limit=None, begindate=dt.date(2006, 3, 21), enddate=dt.d
         pool.close()
         pool.join()
 
-    return all_tweets
-
-def query_tweets_from_user(user, limit=None):
+def query_tweets_from_user(user, limit=None, timeout=None):
     pos = None
     tweets = []
     try:
         while True:
-           new_tweets, pos = query_single_page(query, lang='', pos, from_user=True)
+           new_tweets, pos = query_single_page(query, '', pos, from_user=True, timeout=timeout)
            if len(new_tweets) == 0:
                logger.info("Got {} tweets from username {}".format(len(tweets), user))
                return tweets
